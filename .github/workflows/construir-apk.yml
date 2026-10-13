@@ -1,0 +1,66 @@
+name: Construir APK
+
+on:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  construir:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+
+      - name: Crear proyecto Flutter y meter el código
+        run: |
+          flutter create --org com.davy --project-name mensajes_sin_internet app
+          cp main.dart app/lib/main.dart
+          cd app
+          flutter pub add nearby_connections permission_handler
+          python3 - <<'EOF'
+          p = 'android/app/src/main/AndroidManifest.xml'
+          s = open(p).read()
+          permisos = [
+              ('ACCESS_WIFI_STATE', ''),
+              ('CHANGE_WIFI_STATE', ''),
+              ('BLUETOOTH', ' android:maxSdkVersion="30"'),
+              ('BLUETOOTH_ADMIN', ' android:maxSdkVersion="30"'),
+              ('ACCESS_COARSE_LOCATION', ''),
+              ('ACCESS_FINE_LOCATION', ''),
+              ('BLUETOOTH_ADVERTISE', ''),
+              ('BLUETOOTH_CONNECT', ''),
+              ('BLUETOOTH_SCAN', ''),
+              ('NEARBY_WIFI_DEVICES', ''),
+          ]
+          bloque = ''.join(
+              f'    <uses-permission android:name="android.permission.{n}"{extra} />\n'
+              for n, extra in permisos
+          )
+          s = s.replace('<application', bloque + '    <application', 1)
+          s = s.replace('android:label="mensajes_sin_internet"', 'android:label="Mensajes sin internet"')
+          open(p, 'w').write(s)
+          EOF
+          sed -i 's/minSdk = flutter.minSdkVersion/minSdk = 23/' android/app/build.gradle.kts 2>/dev/null || true
+          sed -i 's/minSdkVersion flutter.minSdkVersion/minSdkVersion 23/' android/app/build.gradle 2>/dev/null || true
+
+      - name: Construir APK
+        working-directory: app
+        run: flutter build apk --release
+
+      - name: Publicar APK para descargar
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ github.run_number }}
+          name: Versión ${{ github.run_number }}
+          files: app/build/app/outputs/flutter-apk/app-release.apk
