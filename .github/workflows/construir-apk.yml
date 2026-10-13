@@ -53,6 +53,9 @@ jobs:
           EOF
           sed -i 's/minSdk = flutter.minSdkVersion/minSdk = 23/' android/app/build.gradle.kts 2>/dev/null || true
           sed -i 's/minSdkVersion flutter.minSdkVersion/minSdkVersion 23/' android/app/build.gradle 2>/dev/null || true
+          sed -i 's/compileSdk = flutter.compileSdkVersion/compileSdk = 37/' android/app/build.gradle.kts 2>/dev/null || true
+          sed -i 's/compileSdkVersion flutter.compileSdkVersion/compileSdkVersion 37/' android/app/build.gradle 2>/dev/null || true
+          echo "android.suppressUnsupportedCompileSdk=37" >> android/gradle.properties
 
       - name: Construir APK
         working-directory: app
