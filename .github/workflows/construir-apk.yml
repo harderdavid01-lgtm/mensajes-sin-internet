@@ -27,7 +27,7 @@ jobs:
           flutter create --org com.davy --project-name mensajes_sin_internet app
           cp main.dart app/lib/main.dart
           cd app
-          flutter pub add nearby_connections permission_handler
+          flutter pub add nearby_connections permission_handler shared_preferences
           python3 - <<'EOF'
           p = 'android/app/src/main/AndroidManifest.xml'
           s = open(p).read()
