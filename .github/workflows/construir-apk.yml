@@ -26,14 +26,29 @@ jobs:
         run: |
           flutter create --org com.davy --project-name mensajes_sin_internet app
           cp main.dart app/lib/main.dart
+
+          # Código nativo de Android (SMS y estado de Bluetooth/Wi-Fi/GPS)
+          KT=app/android/app/src/main/kotlin/com/davy/mensajes_sin_internet
+          mkdir -p $KT
+          if [ -f MainActivity.kt ]; then cp MainActivity.kt $KT/MainActivity.kt; fi
+          if [ -f SmsReceiver.kt ]; then cp SmsReceiver.kt $KT/SmsReceiver.kt; fi
+
+          # Llave fija para firmar: así las nuevas versiones se instalan encima sin desinstalar
+          if [ -f fija.keystore ]; then cp fija.keystore app/android/app/fija.keystore; fi
+
           cd app
           flutter pub add nearby_connections permission_handler shared_preferences
+
           python3 - <<'EOF'
+          import os, re
+
+          # ----- Permisos y receptor de SMS -----
           p = 'android/app/src/main/AndroidManifest.xml'
           s = open(p).read()
           permisos = [
               ('ACCESS_WIFI_STATE', ''),
               ('CHANGE_WIFI_STATE', ''),
+              ('ACCESS_NETWORK_STATE', ''),
               ('BLUETOOTH', ' android:maxSdkVersion="30"'),
               ('BLUETOOTH_ADMIN', ' android:maxSdkVersion="30"'),
               ('ACCESS_COARSE_LOCATION', ''),
@@ -42,6 +57,8 @@ jobs:
               ('BLUETOOTH_CONNECT', ''),
               ('BLUETOOTH_SCAN', ''),
               ('NEARBY_WIFI_DEVICES', ''),
+              ('SEND_SMS', ''),
+              ('RECEIVE_SMS', ''),
           ]
           bloque = ''.join(
               f'    <uses-permission android:name="android.permission.{n}"{extra} />\n'
@@ -49,13 +66,68 @@ jobs:
           )
           s = s.replace('<application', bloque + '    <application', 1)
           s = s.replace('android:label="mensajes_sin_internet"', 'android:label="Mensajes sin internet"')
+          if os.path.exists('../SmsReceiver.kt'):
+              receptor = (
+                  '        <receiver android:name=".SmsReceiver" android:exported="true"\n'
+                  '            android:permission="android.permission.BROADCAST_SMS">\n'
+                  '            <intent-filter android:priority="999">\n'
+                  '                <action android:name="android.provider.Telephony.SMS_RECEIVED" />\n'
+                  '            </intent-filter>\n'
+                  '        </receiver>\n'
+              )
+              s = s.replace('</application>', receptor + '    </application>', 1)
           open(p, 'w').write(s)
+
+          # ----- Versiones de Android y firma fija -----
+          tiene_llave = os.path.exists('android/app/fija.keystore')
+          kts = 'android/app/build.gradle.kts'
+          groovy = 'android/app/build.gradle'
+          if os.path.exists(kts):
+              g = open(kts).read()
+              g = g.replace('minSdk = flutter.minSdkVersion', 'minSdk = 23')
+              g = g.replace('compileSdk = flutter.compileSdkVersion', 'compileSdk = 37')
+              if tiene_llave:
+                  firma = (
+                      '    signingConfigs {\n'
+                      '        create("fija") {\n'
+                      '            storeFile = file("fija.keystore")\n'
+                      '            storePassword = "android"\n'
+                      '            keyAlias = "androiddebugkey"\n'
+                      '            keyPassword = "android"\n'
+                      '        }\n'
+                      '    }\n\n'
+                      '    buildTypes {'
+                  )
+                  g = g.replace('    buildTypes {', firma, 1)
+                  g = g.replace('signingConfigs.getByName("debug")', 'signingConfigs.getByName("fija")')
+              open(kts, 'w').write(g)
+          elif os.path.exists(groovy):
+              g = open(groovy).read()
+              g = g.replace('minSdkVersion flutter.minSdkVersion', 'minSdkVersion 23')
+              g = g.replace('minSdk = flutter.minSdkVersion', 'minSdk = 23')
+              g = g.replace('compileSdkVersion flutter.compileSdkVersion', 'compileSdkVersion 37')
+              g = g.replace('compileSdk = flutter.compileSdkVersion', 'compileSdk = 37')
+              if tiene_llave:
+                  firma = (
+                      '    signingConfigs {\n'
+                      '        fija {\n'
+                      '            storeFile file("fija.keystore")\n'
+                      '            storePassword "android"\n'
+                      '            keyAlias "androiddebugkey"\n'
+                      '            keyPassword "android"\n'
+                      '        }\n'
+                      '    }\n\n'
+                      '    buildTypes {'
+                  )
+                  g = g.replace('    buildTypes {', firma, 1)
+                  g = g.replace('signingConfig = signingConfigs.debug', 'signingConfig = signingConfigs.fija')
+                  g = g.replace('signingConfig signingConfigs.debug', 'signingConfig signingConfigs.fija')
+              open(groovy, 'w').write(g)
           EOF
-          sed -i 's/minSdk = flutter.minSdkVersion/minSdk = 23/' android/app/build.gradle.kts 2>/dev/null || true
-          sed -i 's/minSdkVersion flutter.minSdkVersion/minSdkVersion 23/' android/app/build.gradle 2>/dev/null || true
-          sed -i 's/compileSdk = flutter.compileSdkVersion/compileSdk = 37/' android/app/build.gradle.kts 2>/dev/null || true
-          sed -i 's/compileSdkVersion flutter.compileSdkVersion/compileSdkVersion 37/' android/app/build.gradle 2>/dev/null || true
+
           echo "android.suppressUnsupportedCompileSdk=37" >> android/gradle.properties
+          echo "----- Revisión rápida -----"
+          grep -n "fija\|compileSdk\|minSdk" android/app/build.gradle* || true
 
       - name: Construir APK
         working-directory: app
